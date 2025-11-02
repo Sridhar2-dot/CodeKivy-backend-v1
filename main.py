@@ -19,9 +19,7 @@ from services.document_service import process_document, summarize_document
 app = FastAPI()
 
 origins = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://code-kivy-frontend-v1.vercel.app/"
+    "https://code-kivy-frontend-v1.vercel.app"
 ]
 app.add_middleware(
     CORSMiddleware,
