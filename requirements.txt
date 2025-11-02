@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+httpx
+deepgram-sdk
+python-multipart
+PyPDF2
+python-docx
+groq
