@@ -24,7 +24,7 @@ app = FastAPI()
 origins = [
     # "http://localhost:5173",
     # "http://localhost:5174",
-    "https://code-kivy-frontend-v1.vercel.app"
+    "https://codekivy.vercel.app"
 ]
 app.add_middleware(
     CORSMiddleware,
