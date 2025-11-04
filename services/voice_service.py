@@ -21,7 +21,7 @@ async def transcribe_audio(audio_data: bytes) -> str:
         print(f"✓ Audio: {len(audio_data)} bytes")
         
         # Use faster model and fewer features for lower latency
-        url = "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=false&punctuate=false&language=en"
+        url = "https://api.deepgram.com/v1/listen?aura-2-luna-en&smart_format=false&punctuate=false&language=en"
         
         headers = {
             "Authorization": f"Token {api_key}",
@@ -75,7 +75,7 @@ async def speak_text(text: str) -> bytes:
         
         # Using faster model and lower sample rate for reduced latency
         # aura-luna-en is faster than asteria
-        url = "https://api.deepgram.com/v1/speak?model=aura-orpheus-en&encoding=linear16&sample_rate=16000&container=wav"
+        url = "https://api.deepgram.com/v1/speak?model=aura-2-luna-en&encoding=linear16&sample_rate=16000&container=wav"
 
         
         headers = {
