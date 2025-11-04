@@ -4,8 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict
 
-# Import Gemini for image support
-from services.gemini_service import get_gemini_response 
+# Import Gemini for image support (NOW WITH HISTORY)
+from services.gemini_service import (
+    get_gemini_response, 
+    clear_chat_history as clear_gemini_history
+)
 
 # Import Groq for fast responses
 from services.groq_service import get_groq_response, get_groq_voice_response
@@ -13,12 +16,14 @@ from services.groq_service import get_groq_response, get_groq_voice_response
 # Import Voice service
 from services.voice_service import transcribe_audio, speak_text
 
-# Import Document service (NEW)
+# Import Document service
 from services.document_service import process_document, summarize_document
 
 app = FastAPI()
 
 origins = [
+    # "http://localhost:5173",
+    # "http://localhost:5174",
     "https://code-kivy-frontend-v1.vercel.app"
 ]
 app.add_middleware(
@@ -33,20 +38,20 @@ app.add_middleware(
 # Key: session_id, Value: document_text
 active_documents: Dict[str, str] = {}
 
-# --- ENHANCED CHAT ENDPOINT (Text + Images + Documents) ---
+# --- ENHANCED CHAT ENDPOINT (Text + Images + Documents) WITH HISTORY ---
 class ChatRequest(BaseModel):
     message: str
     image: Optional[str] = None
-    document: Optional[Dict] = None  # NEW: {name, type, data, size}
+    document: Optional[Dict] = None  # {name, type, data, size}
     mode: Optional[str] = "chat"  # "chat" or "document"
-    session_id: Optional[str] = "default"  # For tracking document context
+    session_id: Optional[str] = "default"  # For tracking conversation & document context
 
 @app.post("/api/chat")
 async def handle_chat(request: ChatRequest):
     """
     Enhanced chat endpoint supporting:
-    - Regular text chat (Groq - fast)
-    - Image analysis (Gemini - supports vision)
+    - Regular text chat with conversation history (Gemini)
+    - Image analysis with context (Gemini - supports vision)
     - Document Q&A (Groq with document context)
     """
     user_message = request.message
@@ -55,14 +60,20 @@ async def handle_chat(request: ChatRequest):
     mode = request.mode
     session_id = request.session_id or "default"
     
-    print(f"📝 Chat request: {user_message[:50]}...")
+    print(f"📝 Chat request: {user_message[:50]}... [Session: {session_id}]")
     
     try:
-        # --- SCENARIO 1: Image Analysis (use Gemini for vision) ---
+        # --- SCENARIO 1: Image Analysis (use Gemini with history) ---
         if image_base64:
             print("🖼️ Processing with image...")
-            response = await get_gemini_response(user_message, image_base64)
-            return {"response": response, "mode": "image"}
+            # Use Gemini with full conversation history for context-aware image analysis
+            response = await get_gemini_response(
+                user_message, 
+                image_base64=image_base64,
+                session_id=session_id,
+                use_history=True
+            )
+            return {"response": response, "mode": "image", "session_id": session_id}
         
         # --- SCENARIO 2: Document Upload (process and store) ---
         if document and mode == "document":
@@ -95,7 +106,8 @@ Ask me anything about this document!"""
             return {
                 "response": initial_response,
                 "mode": "document",
-                "document_loaded": True
+                "document_loaded": True,
+                "session_id": session_id
             }
         
         # --- SCENARIO 3: Document Q&A (use stored document context) ---
@@ -116,13 +128,19 @@ Ask me anything about this document!"""
             
             return {
                 "response": response,
-                "mode": "document"
+                "mode": "document",
+                "session_id": session_id
             }
         
-        # --- SCENARIO 4: Regular Chat (use Groq for speed) ---
-        print("💬 Regular chat mode...")
-        response = await get_groq_response(user_message)
-        return {"response": response, "mode": "chat"}
+        # --- SCENARIO 4: Regular Chat (use Gemini with history) ---
+        print("💬 Regular chat mode with conversation history...")
+        # Use Gemini for chat with full conversation context
+        response = await get_gemini_response(
+            user_message,
+            session_id=session_id,
+            use_history=True
+        )
+        return {"response": response, "mode": "chat", "session_id": session_id}
     
     except Exception as e:
         print(f"❌ Chat error: {e}")
@@ -131,6 +149,7 @@ Ask me anything about this document!"""
             "mode": "error"
         }
 
+chat_history = [] 
 
 # --- VOICE ENDPOINT (Uses Groq for speed) ---
 @app.post("/api/voice")
@@ -149,10 +168,17 @@ async def handle_voice(file: UploadFile = File(...)):
             return {"error": transcript}
         print(f"✅ Transcript: {transcript}")
 
+        # <<< NEW: Add user's message to history >>>
+        chat_history.append({"role": "user", "content": transcript})
+
         # 3. Get response from Groq (FASTEST) - Voice optimized
         print("🚀 Getting Groq response...")
-        text_response = await get_groq_voice_response(transcript)
+        # <<< MODIFIED: Pass the entire history list to Groq >>>
+        text_response = await get_groq_voice_response(chat_history)
         print(f"✅ Response: {text_response[:50]}...")
+
+        # <<< NEW: Add assistant's response to history >>>
+        chat_history.append({"role": "assistant", "content": text_response})
 
         # 4. Generate speech
         print("🔊 Generating speech...")
@@ -174,7 +200,6 @@ async def handle_voice(file: UploadFile = File(...)):
     except Exception as e:
         print(f"❌ Voice error: {e}")
         return {"error": str(e)}
-
 
 # --- DOCUMENT MANAGEMENT ENDPOINTS ---
 
@@ -200,17 +225,52 @@ async def document_status(session_id: str = "default"):
     }
 
 
+# --- NEW: CHAT HISTORY MANAGEMENT ---
+
+@app.post("/api/chat/clear")
+async def clear_chat(session_id: str = "default"):
+    """Clear chat history for a session."""
+    clear_gemini_history(session_id)
+    return {
+        "status": "cleared",
+        "session_id": session_id,
+        "message": "Chat history cleared successfully"
+    }
+
+
+@app.post("/api/session/reset")
+async def reset_session(session_id: str = "default"):
+    """Reset both chat history and document for a session."""
+    # Clear chat history
+    clear_gemini_history(session_id)
+    
+    # Clear document
+    if session_id in active_documents:
+        del active_documents[session_id]
+    
+    return {
+        "status": "reset",
+        "session_id": session_id,
+        "message": "Session reset successfully"
+    }
+
+
 @app.get("/")
 def read_root():
     return {
         "status": "CodeKivy API running",
         "features": {
-            "chat": "Groq (ultra-fast text)",
-            "images": "Gemini (vision support)",
+            "chat": "Gemini (with conversation history)",
+            "images": "Gemini (vision support with context)",
             "documents": "PDF/DOCX/TXT analysis",
             "voice": "Groq + Deepgram"
         },
-        "active_sessions": len(active_documents)
+        "active_sessions": len(active_documents),
+        "new_features": [
+            "Conversation history maintained per session",
+            "Context-aware responses",
+            "Session management endpoints"
+        ]
     }
 
 
