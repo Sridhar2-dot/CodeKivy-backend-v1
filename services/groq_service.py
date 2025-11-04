@@ -119,10 +119,10 @@ Please answer based ONLY on the document content above."""
         print(f"Groq error: {e}")
         return "Sorry, something went wrong on my end."
 
-
-async def get_groq_voice_response(user_message: str) -> str:
+async def get_groq_voice_response(messages_list: list) -> str:
     """
     Optimized for voice - shorter responses.
+    Now accepts a full message history list.
     """
     api_key = os.getenv("GROQ_API_KEY", "")
     
@@ -131,12 +131,17 @@ async def get_groq_voice_response(user_message: str) -> str:
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     
+    # --- MODIFIED PART ---
+    # We now prepend the system prompt to the incoming message list
+    # to create the final payload for the API.
+    all_messages = [
+        {"role": "system", "content": CODEKIVY_VOICE_PROMPT}
+    ] + messages_list  # Add the entire history after the system prompt
+    # --- END MODIFIED PART ---
+
     payload = {
         "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": CODEKIVY_VOICE_PROMPT},
-            {"role": "user", "content": user_message}
-        ],
+        "messages": all_messages,  # Pass the combined list
         "temperature": 0.7,
         "max_tokens": 150,  # Very short for voice
         "top_p": 1,
