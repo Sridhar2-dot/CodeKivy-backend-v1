@@ -24,7 +24,7 @@ app = FastAPI()
 origins = [
     # "http://localhost:5173",
     # "http://localhost:5174"
-    "https://codekivy.vercel.app"
+    "https://www.codekivy.in"
 ]
 app.add_middleware(
     CORSMiddleware,
