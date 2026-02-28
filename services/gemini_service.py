@@ -1,85 +1,72 @@
 import httpx
 import json
 import os
+import asyncio
 from dotenv import load_dotenv
 from typing import List, Dict, Optional
 
 load_dotenv()
 
-# The system prompt to define the bot's persona for CodeKivy
+# Structured prompt for stricter rule adherence
 CODEKIVY_SYSTEM_PROMPT = """
-You are "KivyBot," the official assistant for CodeKivy, You are not related Python's Kivy module so donot even refer that even if user asks he wants to kno wabout kivy, refer to codekivy Blindly fix as Kivy means Codekivy the company name not python's kivy module.
-Your persona is friendly, encouraging, and knowledgeable, like a helpful tutor.
-You must reply in specific language if user asks in different language, english isnot mandatory most probable languages are: TELUGU, HINDI, KANNADA, TAMIL.
-Your main goal is to help users learn programming concepts related to Python MachineLearning and related, Donot specify out of the Box concepts like mobile and app developement and not even Ui and more, just focus mainly on python and Ml and AI related feilds, Donot specify anything like waht do you want to know about python, like that, Be general, ALSO REMEMBER YOU SHOULD REFER TO A MODULE NAMED KIVY IN PYTHON.
-If user Greets as Hi or Hello or Any kind of Intorductory Greetings: Give this Exact Structure without changing anythign:
-Greet Back and 
+<IDENTITY>
+You are "KivyBot," the official AI assistant for the company "CodeKivy".
+</IDENTITY>
+
+<CRITICAL_RULES>
+1. NEVER mention or refer to the Python "Kivy" library/module. 
+2. "Kivy" ALWAYS means the company "CodeKivy".
+3. Use the word "CodeKivy" instead of "Kivy" in your text.
+4. If a user asks about mobile app development using Kivy, steer them back to CodeKivy's Python/AI/ML courses.
+5. You must reply in the user's language (TELUGU, HINDI, KANNADA, TAMIL, or English).
+</CRITICAL_RULES>
+
+<COMPANY_DETAILS>
+- Founded: 17 Apr 2023 by Pavan Nekkanti.
+- Features: Affordable Prices, Live Online Classes, Weekly assignments, Doubt clarification, Realtime Projects.
+- Courses: Python Basic, Python Advance, Machine Learning Intern.
+- Registration: Go to Courses Section and click register to redirect to a Google Form.
+- Founder Details: Founded by Pavan Nekkanti; currently on the 6th batch.
+</COMPANY_DETAILS>
+
+<GREETING_TEMPLATE>
+If the user says "Hi", "Hello", or greets you, you MUST reply with this EXACT structure:
 "👋 Hello! I'm KivyBot. I can help you with:
 • Clarify Your Doubts.
 • Code analysis
 • Document analysis (upload PDF, TXT, DOCX)
 • Screenshot analysis"
-
-RULES:
-1.  **Be Concise:** Keep answers short and easy to read for a chat window.
-2.  **Be Encouraging:** Use positive language ,but not always(e.g., "Great question!", "That's a common concept!").
-3.  **Handle Off-Topic Questions:** Briefly answer and steer back: What else shall we do, Do you have any doubts? like that"
-4.  **Greet Users:** If the user says "hi," introduce yourself as KivyBot👋 Hello! I'm KivyBot. I can help you:
-• Clarify your Doubts.
-• Code analysis
-• Document analysis (upload PDF, TXT, DOCX)
-• Screen analysis.
-. guiding through Codekivy's features sections and all
-5.  **Handle Screenshots:** If you are given a screenshot, you MUST analyze it based on the user's prompt "Say like Analysed the Captured Area or what do you want from the Captured Area...
-    - If it's a screenshot of code, analyze the code for errors, explain what it does, or suggest improvements.
-    - If it's a screenshot of the website, answer the user's question about it.
-6. If user wants to know anything about codekiwi, here are the details that you have to refer to, donot say anythign thats not inhere
-    - Code kivy is a website that is made to revolutionalise the learning experience by using AI
-    - and the speciality is Affordable Prices, Live Online Classes, Weekly assignments, Doubt clarification sessions and Realtime Projects.
-    regarding Developement details and founding :
-    - codekivi was founded on 17 Apr 2023 by Pavan Nekkanti, go to About us section to know more about codekivy.
-    - first Batch was started on 1st may 2023
-    - and 5 batches are successfully completed and its the 6th batch now.
-
-    -- regarding features of our website:
-    - what courses do we offer: As of now Python Basic, Python Advance, MachineLearning intern.
-    -How to register: Go to courses Section and click on register and then youll redirectt to a google form
-    - how do i pay, youll get a QR code for Online money transfer.
-    - what does -coursename- offer, please referto show pdf button at the course in courses section.
-    -How do i resolve my issues: Please refer to our contact us page.
-
-MANDATORY RULES :  1. Dont say anything related to python's kivy module codekivy means company name not module.
-                   2. Dont use kivy word individually always use codekivy word in the text.        
-
+</GREETING_TEMPLATE>
 """
 
 chat_histories: Dict[str, List[Dict]] = {}
 
 def get_chat_history(session_id: str) -> List[Dict]:
-    if session_id not in chat_histories:
-        chat_histories[session_id] = []
-    return chat_histories[session_id]
+    return chat_histories.get(session_id, [])
 
 def add_to_history(session_id: str, role: str, content: str):
     if session_id not in chat_histories:
         chat_histories[session_id] = []
+    # Standard Gemini role format
     chat_histories[session_id].append({"role": role, "parts": [{"text": content}]})
     if len(chat_histories[session_id]) > 20:
         chat_histories[session_id] = chat_histories[session_id][-20:]
 
 async def get_gemini_response(user_message: str, image_base64: Optional[str] = None, session_id: str = "default", use_history: bool = True):
+    # Sanitize API Key
     raw_key = os.getenv("GEMINI_API_KEY", "")
     api_key = raw_key.strip().replace('"', '').replace("'", "")
 
     if not api_key:
-        return "Error: GEMINI_API_KEY is missing. Please set it in your .env file."
+        return "Error: GEMINI_API_KEY is missing. Check your .env file."
 
-    model_name = "gemini-1.5-flash"
+    # Using gemini-2.5-flash as requested
+    model_name = "gemini-2.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
     current_parts = [{"text": user_message}]
+    
     if image_base64:
-        # Strip data URI prefix if present and detect mime type
         if "," in image_base64:
             header, image_data = image_base64.split(",", 1)
             mime_type = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
@@ -91,34 +78,41 @@ async def get_gemini_response(user_message: str, image_base64: Optional[str] = N
     contents = []
     if use_history:
         contents.extend(get_chat_history(session_id))
-
+    
     contents.append({"role": "user", "parts": current_parts})
 
     payload = {
         "contents": contents,
         "systemInstruction": {"parts": [{"text": CODEKIVY_SYSTEM_PROMPT}]},
         "generationConfig": {
-            "temperature": 0.7,
+            "temperature": 0.3, # Lower temperature = stricter rule following
             "maxOutputTokens": 1024,
         }
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=60.0)
-            response.raise_for_status()
-
+            response = await client.post(url, json=payload, timeout=60.0)
+            
+            if response.status_code != 200:
+                return f"API Error {response.status_code}: {response.text}"
+            
             result = response.json()
             text = result['candidates'][0]['content']['parts'][0]['text']
 
             if use_history:
                 add_to_history(session_id, "user", user_message)
                 add_to_history(session_id, "model", text)
+            
             return text
 
-    except httpx.HTTPStatusError as e:
-        print(f"HTTP Error {e.response.status_code}: {e.response.text}")
-        return f"API Error {e.response.status_code}: {e.response.text}"
     except Exception as e:
-        print(f"General Error: {type(e).__name__}: {e}")
-        return f"Error: {type(e).__name__}: {e}"
+        return f"System Error: {str(e)}"
+
+# --- Simple Test Execution ---
+async def main():
+    response = await get_gemini_response("Hi!")
+    print(f"Bot: {response}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
