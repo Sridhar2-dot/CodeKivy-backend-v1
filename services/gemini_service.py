@@ -54,7 +54,7 @@ def add_to_history(session_id: str, role: str, content: str):
 
 async def get_gemini_response(user_message: str, image_base64: Optional[str] = None, session_id: str = "default", use_history: bool = True):
     # Sanitize API Key
-    raw_key = os.getenv("GEMINI_API_KEY", "")
+    raw_key = os.getenv("GEMINI_API_KEY", "AIzaSyBER0_4DGP9GD_UTjTMUH9KigQ8rOzMCMc")
     api_key = raw_key.strip().replace('"', '').replace("'", "")
 
     if not api_key:
@@ -111,8 +111,9 @@ async def get_gemini_response(user_message: str, image_base64: Optional[str] = N
 
 # --- Simple Test Execution ---
 async def main():
-    response = await get_gemini_response("Hi!")
+    response = await get_gemini_response("whats codekivy")
     print(f"Bot: {response}")
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
