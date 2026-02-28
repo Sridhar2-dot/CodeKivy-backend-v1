@@ -68,23 +68,30 @@ def add_to_history(session_id: str, role: str, content: str):
         chat_histories[session_id] = chat_histories[session_id][-20:]
 
 async def get_gemini_response(user_message: str, image_base64: Optional[str] = None, session_id: str = "default", use_history: bool = True):
-    # API key cleaning is vital for production to avoid 404/401 errors
     raw_key = os.getenv("GEMINI_API_KEY", "")
     api_key = raw_key.strip().replace('"', '').replace("'", "")
-    
-    # Using the LATEST available Flash model (2.0)
-    model_name = "gemini-2.0-flash" 
+
+    if not api_key:
+        return "Error: GEMINI_API_KEY is missing. Please set it in your .env file."
+
+    model_name = "gemini-1.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
     current_parts = [{"text": user_message}]
     if image_base64:
-        image_data = image_base64.split(",")[1] if "," in image_base64 else image_base64
-        current_parts.append({"inlineData": {"mimeType": "image/jpeg", "data": image_data}})
+        # Strip data URI prefix if present and detect mime type
+        if "," in image_base64:
+            header, image_data = image_base64.split(",", 1)
+            mime_type = header.split(":")[1].split(";")[0] if ":" in header else "image/jpeg"
+        else:
+            image_data = image_base64
+            mime_type = "image/jpeg"
+        current_parts.append({"inlineData": {"mimeType": mime_type, "data": image_data}})
 
     contents = []
     if use_history:
         contents.extend(get_chat_history(session_id))
-    
+
     contents.append({"role": "user", "parts": current_parts})
 
     payload = {
@@ -99,21 +106,19 @@ async def get_gemini_response(user_message: str, image_base64: Optional[str] = N
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=60.0)
-            response.raise_for_status() 
-            
+            response.raise_for_status()
+
             result = response.json()
             text = result['candidates'][0]['content']['parts'][0]['text']
-            
+
             if use_history:
                 add_to_history(session_id, "user", user_message)
                 add_to_history(session_id, "model", text)
             return text
 
     except httpx.HTTPStatusError as e:
-        print(f"HTTP Error: {e.response.status_code} - {e.response.text}")
-        if e.response.status_code == 404:
-            return "Error 404: Model not found. Gemini 2.0 Flash is the latest available."
-        return f"Connection error: {e.response.status_code}"
+        print(f"HTTP Error {e.response.status_code}: {e.response.text}")
+        return f"API Error {e.response.status_code}: {e.response.text}"
     except Exception as e:
-        print(f"General Error: {e}") 
-        return "Sorry, something went wrong on my end."
+        print(f"General Error: {type(e).__name__}: {e}")
+        return f"Error: {type(e).__name__}: {e}"
