@@ -53,134 +53,67 @@ MANDATORY RULES :  1. Dont say anything related to python's kivy module codekivy
 
 """
 
-# Store chat history per session
 chat_histories: Dict[str, List[Dict]] = {}
 
-
 def get_chat_history(session_id: str) -> List[Dict]:
-    """Retrieve chat history for a session."""
     if session_id not in chat_histories:
         chat_histories[session_id] = []
     return chat_histories[session_id]
 
-
 def add_to_history(session_id: str, role: str, content: str):
-    """Add a message to chat history."""
     if session_id not in chat_histories:
         chat_histories[session_id] = []
-    
-    chat_histories[session_id].append({
-        "role": role,
-        "parts": [{"text": content}]
-    })
-    
-    # Keep only last 10 exchanges (20 messages) to avoid token limits
+    chat_histories[session_id].append({"role": role, "parts": [{"text": content}]})
     if len(chat_histories[session_id]) > 20:
         chat_histories[session_id] = chat_histories[session_id][-20:]
 
-
-def clear_chat_history(session_id: str):
-    """Clear chat history for a session."""
-    if session_id in chat_histories:
-        chat_histories[session_id] = []
-
-
-async def get_gemini_response(
-    user_message: str, 
-    image_base64: Optional[str] = None,
-    session_id: str = "default",
-    use_history: bool = True
-):
-    # Fetch and clean the API Key
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+async def get_gemini_response(user_message: str, image_base64: Optional[str] = None, session_id: str = "default", use_history: bool = True):
+    # API key cleaning is vital for production to avoid 404/401 errors
+    raw_key = os.getenv("GEMINI_API_KEY", "")
+    api_key = raw_key.strip().replace('"', '').replace("'", "")
     
-    # Standardized URL for the v1beta endpoint with the stable 1.5-flash model
-    # Note: 404 is usually caused by an incorrect model name or extra characters in the key
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-    url = f"{base_url}?key={api_key}"
+    # Using the LATEST available Flash model (2.0)
+    model_name = "gemini-2.0-flash" 
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
-    # --- Build the current message parts ---
-    current_parts = []
-    current_parts.append({"text": user_message})
-
+    current_parts = [{"text": user_message}]
     if image_base64:
-        # Process image
-        if "," in image_base64:
-            image_data = image_base64.split(",")[1]
-        else:
-            image_data = image_base64
+        image_data = image_base64.split(",")[1] if "," in image_base64 else image_base64
+        current_parts.append({"inlineData": {"mimeType": "image/jpeg", "data": image_data}})
 
-        current_parts.append({
-            "inlineData": {
-                "mimeType": "image/jpeg",
-                "data": image_data
-            }
-        })
-
-    # --- Build contents with history ---
     contents = []
-    
     if use_history:
-        # Add previous conversation history
-        history = get_chat_history(session_id)
-        contents.extend(history)
+        contents.extend(get_chat_history(session_id))
     
-    # Add current user message
-    contents.append({
-        "role": "user",
-        "parts": current_parts
-    })
+    contents.append({"role": "user", "parts": current_parts})
 
-    # --- Construct the Payload ---
     payload = {
         "contents": contents,
-        "systemInstruction": {
-            "parts": [{"text": CODEKIVY_SYSTEM_PROMPT}]
-        },
+        "systemInstruction": {"parts": [{"text": CODEKIVY_SYSTEM_PROMPT}]},
         "generationConfig": {
             "temperature": 0.7,
-            "topK": 40,
-            "topP": 0.95,
             "maxOutputTokens": 1024,
         }
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                timeout=60.0
-            )
-
+            response = await client.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=60.0)
             response.raise_for_status() 
             
             result = response.json()
+            text = result['candidates'][0]['content']['parts'][0]['text']
             
-            candidate = result.get("candidates", [{}])[0]
-            content = candidate.get("content", {})
-            part = content.get("parts", [{}])[0]
-            text = part.get("text", "Sorry, I couldn't generate a response right now.")
-            
-            # --- Store in history (only if using history) ---
             if use_history:
                 add_to_history(session_id, "user", user_message)
                 add_to_history(session_id, "model", text)
-            
             return text
 
     except httpx.HTTPStatusError as e:
-        # Debugging prints for production logs
-        print(f"HTTP error occurred: {e.response.status_code}")
-        print(f"Error Response Body: {e.response.text}")
-        
-        if e.response.status_code == 400:
-            return "Sorry, there seems to be an issue with the API configuration. (Error 400)"
-        elif e.response.status_code == 404:
-            return "Sorry, the AI model endpoint was not found. Please check the model name. (Error 404)"
-            
-        return f"Sorry, I'm having trouble connecting to the AI (HTTP error: {e.response.status_code})."
+        print(f"HTTP Error: {e.response.status_code} - {e.response.text}")
+        if e.response.status_code == 404:
+            return "Error 404: Model not found. Gemini 2.0 Flash is the latest available."
+        return f"Connection error: {e.response.status_code}"
     except Exception as e:
-        print(f"An error occurred: {e}") 
+        print(f"General Error: {e}") 
         return "Sorry, something went wrong on my end."
