@@ -105,7 +105,7 @@ async def get_gemini_response(
     api_key = os.getenv("GEMINI_API_KEY", "")
     
     # Use the model URL
-    model_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key="
+    model_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="
     url = f"{model_url}{api_key}"
 
     # --- Build the current message parts ---
