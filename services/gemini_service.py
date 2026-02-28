@@ -7,28 +7,27 @@ from typing import List, Dict, Optional
 
 load_dotenv()
 
-# The system prompt with strict identity rules for CodeKivy
+# Strict KivyBot rules to avoid Python library confusion
 CODEKIVY_SYSTEM_PROMPT = """
 <IDENTITY>
-You are "KivyBot," the official assistant for CodeKivy. 
+You are "KivyBot," the official assistant for CodeKivy.
 IMPORTANT: You are NOT related to the Python 'Kivy' library. "Kivy" always refers to the company "CodeKivy".
 </IDENTITY>
 
-<RULES>
-1. Always refer to the company as "CodeKivy".
-2. Focus on Python, Machine Learning, and AI courses.
-3. If asked about mobile apps/UI, steer the user back to CodeKivy's AI/ML focus.
+<CRITICAL_RULES>
+1. Always use the word "CodeKivy" instead of "Kivy".
+2. You help with Python, Machine Learning, and AI.
+3. Greet users with the exact bullet-point list provided in your instructions.
 4. Reply in the user's language (Telugu, Hindi, Kannada, Tamil, or English).
-</RULES>
+</CRITICAL_RULES>
 
-<GREETING_TEMPLATE>
-If the user greets you (Hi/Hello), reply exactly with:
+<GREETING>
 "👋 Hello! I'm KivyBot. I can help you with:
 • Clarify Your Doubts.
 • Code analysis
 • Document analysis (upload PDF, TXT, DOCX)
 • Screenshot analysis"
-</GREETING_TEMPLATE>
+</GREETING>
 """
 
 chat_histories: Dict[str, List[Dict]] = {}
@@ -44,25 +43,25 @@ def add_to_history(session_id: str, role: str, content: str):
         chat_histories[session_id] = chat_histories[session_id][-20:]
 
 async def get_gemini_response(user_message: str, image_base64: Optional[str] = None, session_id: str = "default", use_history: bool = True):
-    # --- 1. ENV VAR CHECK ---
-    raw_key = os.getenv("GEMINI_API_KEY", "AIzaSyBER0_4DGP9GD_UTjTMUH9KigQ8rOzMCMc")
+    # 1. Verification of Env Vars
+    raw_key = os.getenv("GEMINI_API_KEY", "")
     if not raw_key:
-        return "DEBUG_ERROR: GEMINI_API_KEY is missing from your deployment environment variables."
+        return "DEPLOYMENT_LOG: Error - GEMINI_API_KEY is not set in the server environment variables."
 
     api_key = raw_key.strip().replace('"', '').replace("'", "")
     
-    # We use v1beta for Gemini 2.5 Flash
+    # Using v1beta for Gemini 2.5 Flash as confirmed by your local diagnostics
     model_name = "gemini-2.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
-    # --- 2. PAYLOAD CONSTRUCTION ---
+    # 2. Payload Construction
     current_parts = [{"text": user_message}]
     if image_base64:
         try:
             image_data = image_base64.split(",")[1] if "," in image_base64 else image_base64
             current_parts.append({"inlineData": {"mimeType": "image/jpeg", "data": image_data}})
         except Exception:
-            return "DEBUG_ERROR: Failed to process image base64 data."
+            return "DEPLOYMENT_LOG: Error processing image data."
 
     contents = []
     if use_history:
@@ -78,30 +77,22 @@ async def get_gemini_response(user_message: str, image_base64: Optional[str] = N
         }
     }
 
-    # --- 3. REQUEST & SPECIFIC EXCEPTION HANDLING ---
+    # 3. Request with High Timeout and Explicit Logging
     try:
-        async with httpx.AsyncClient(timeout=40.0) as client:
+        # 60 second timeout to handle slow cloud-to-google handshakes
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, json=payload)
             
-            # If not 200 OK, return specific HTTP code debugs
+            # If deployment fails, THIS section will tell you why
             if response.status_code != 200:
-                if response.status_code == 401:
-                    return f"DEBUG_ERROR: 401 Unauthorized. Check your API Key string. Raw Response: {response.text[:50]}"
-                elif response.status_code == 429:
-                    return "DEBUG_ERROR: 429 Quota Exceeded. You are hitting the free tier limit."
-                elif response.status_code == 403:
-                    return f"DEBUG_ERROR: 403 Forbidden. Is your key restricted by region? Response: {response.text[:50]}"
-                elif response.status_code == 404:
-                    return f"DEBUG_ERROR: 404 Not Found. Model '{model_name}' might not be available in this region."
-                else:
-                    return f"DEBUG_ERROR: HTTP {response.status_code} - {response.text[:100]}"
+                error_detail = response.text[:150] # Get first 150 chars of error
+                return f"DEPLOYMENT_LOG: Status {response.status_code} - Error: {error_detail}"
 
             result = response.json()
             
-            # Handle empty candidates (Safety filters)
             if not result.get('candidates'):
-                return "DEBUG_ERROR: No candidates returned. The AI might have blocked the response for safety."
-            
+                return "DEPLOYMENT_LOG: Empty response from AI. Possible safety filter trigger."
+
             text = result['candidates'][0]['content']['parts'][0]['text']
 
             if use_history:
@@ -110,35 +101,14 @@ async def get_gemini_response(user_message: str, image_base64: Optional[str] = N
             return text
 
     except httpx.ConnectTimeout:
-        return "DEBUG_ERROR: Connection Timeout. The server is taking too long to reach Google's API."
-    except httpx.ConnectError:
-        return "DEBUG_ERROR: Connection Error. DNS failed or the server has no internet access."
+        return "DEPLOYMENT_LOG: Connection Timeout. Google API is unreachable from this server region."
+    except httpx.ConnectError as e:
+        return f"DEPLOYMENT_LOG: Connection Error. DNS or Network issue: {str(e)}"
     except Exception as e:
-        return f"DEBUG_ERROR: Unexpected {type(e).__name__}: {str(e)}"
-
-# --- DIAGNOSTIC UTILITY ---
-async def run_diagnostics():
-    print("\n--- 🔍 STARTING DEPLOYMENT DIAGNOSTICS ---")
-    raw_key = os.getenv("GEMINI_API_KEY", "")
-    print(f"Key Found in Env: {'YES' if raw_key else 'NO'}")
-    if not raw_key: return
-
-    api_key = raw_key.strip().replace('"', '').replace("'", "")
-    diag_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            res = await client.get(diag_url)
-            print(f"Status: {res.status_code}")
-            if res.status_code == 200:
-                print("✅ Key is valid and can list models.")
-            else:
-                print(f"❌ Key check failed: {res.text}")
-        except Exception as e:
-            print(f"❌ Diagnostic Network Error: {e}")
+        return f"DEPLOYMENT_LOG: {type(e).__name__} - {str(e)}"
 
 if __name__ == "__main__":
-    # For local testing, ensure your .env is set
-    asyncio.run(run_diagnostics())
-    test_resp = asyncio.run(get_gemini_response("Hi!"))
-    print(f"\nFinal Test Response:\n{test_resp}")
+    # Local Test Execution
+    print("Starting local test...")
+    response = asyncio.run(get_gemini_response("Hi!"))
+    print(f"Response: {response}")
