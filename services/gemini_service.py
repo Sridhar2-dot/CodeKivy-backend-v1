@@ -54,7 +54,6 @@ MANDATORY RULES :  1. Dont say anything related to python's kivy module codekivy
 """
 
 # Store chat history per session
-# Structure: {session_id: [{"role": "user", "parts": [{"text": "..."}]}, {"role": "model", "parts": [{"text": "..."}]}]}
 chat_histories: Dict[str, List[Dict]] = {}
 
 
@@ -92,21 +91,13 @@ async def get_gemini_response(
     session_id: str = "default",
     use_history: bool = True
 ):
-    """
-    Get response from Gemini with chat history support.
+    # Fetch and clean the API Key
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     
-    Args:
-        user_message: The user's message
-        image_base64: Optional base64 encoded image
-        session_id: Session ID for maintaining conversation context
-        use_history: Whether to use chat history (disable for single-turn tasks)
-    """
-    
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    
-    # Use the model URL
-    model_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="
-    url = f"{model_url}{api_key}"
+    # Standardized URL for the v1beta endpoint with the stable 1.5-flash model
+    # Note: 404 is usually caused by an incorrect model name or extra characters in the key
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    url = f"{base_url}?key={api_key}"
 
     # --- Build the current message parts ---
     current_parts = []
@@ -180,11 +171,15 @@ async def get_gemini_response(
             return text
 
     except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
+        # Debugging prints for production logs
+        print(f"HTTP error occurred: {e.response.status_code}")
+        print(f"Error Response Body: {e.response.text}")
+        
         if e.response.status_code == 400:
-            error_detail = e.response.json()
-            print(f"API Error Details: {error_detail}")
             return "Sorry, there seems to be an issue with the API configuration. (Error 400)"
+        elif e.response.status_code == 404:
+            return "Sorry, the AI model endpoint was not found. Please check the model name. (Error 404)"
+            
         return f"Sorry, I'm having trouble connecting to the AI (HTTP error: {e.response.status_code})."
     except Exception as e:
         print(f"An error occurred: {e}") 
